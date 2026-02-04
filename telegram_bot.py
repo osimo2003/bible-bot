@@ -13,7 +13,7 @@ TOKEN = os.environ.get("BOT_TOKEN")
 
 DB_PATH = "bible.db"
 
-DAILY_HOUR = 11  # 6 AM
+DAILY_HOUR = 12  # 6 AM
 DAILY_MINUTE = 15
 
 
