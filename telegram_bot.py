@@ -1,11 +1,12 @@
 import sqlite3
 import random
 import os
-from datetime import date, time
+from datetime import date, time, datetime, timedelta
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from flask import Flask
 from threading import Thread
+import pytz
 
 
 # GET TOKEN FROM ENVIRONMENT VARIABLE (SECURE)
@@ -13,8 +14,24 @@ TOKEN = os.environ.get("BOT_TOKEN")
 
 DB_PATH = "bible.db"
 
-DAILY_HOUR = 12  # 6 AM
-DAILY_MINUTE = 15
+# Common timezones for easy selection
+TIMEZONE_OPTIONS = {
+    "1": ("🇬🇧 UK (London)", "Europe/London"),
+    "2": ("🇺🇸 US Eastern (New York)", "America/New_York"),
+    "3": ("🇺🇸 US Central (Chicago)", "America/Chicago"),
+    "4": ("🇺🇸 US Pacific (Los Angeles)", "America/Los_Angeles"),
+    "5": ("🇳🇬 Nigeria (Lagos)", "Africa/Lagos"),
+    "6": ("🇮🇳 India (Mumbai)", "Asia/Kolkata"),
+    "7": ("🇦🇺 Australia (Sydney)", "Australia/Sydney"),
+    "8": ("🇿🇦 South Africa (Johannesburg)", "Africa/Johannesburg"),
+    "9": ("🇰🇪 Kenya (Nairobi)", "Africa/Nairobi"),
+    "10": ("🇬🇭 Ghana (Accra)", "Africa/Accra"),
+    "11": ("🇨🇦 Canada (Toronto)", "America/Toronto"),
+    "12": ("🇩🇪 Germany (Berlin)", "Europe/Berlin"),
+    "13": ("🇫🇷 France (Paris)", "Europe/Paris"),
+    "14": ("🇧🇷 Brazil (Sao Paulo)", "America/Sao_Paulo"),
+    "15": ("🇵🇭 Philippines (Manila)", "Asia/Manila"),
+}
 
 
 flask_app = Flask(__name__)
@@ -45,7 +62,8 @@ def setup_subscribers_table():
             chat_id INTEGER PRIMARY KEY,
             username TEXT,
             first_name TEXT,
-            subscribed_date TEXT
+            subscribed_date TEXT,
+            timezone TEXT DEFAULT 'UTC'
         )
     ''')
     conn.commit()
@@ -53,15 +71,15 @@ def setup_subscribers_table():
     print("✅ Subscribers table ready")
 
 
-def add_subscriber(chat_id, username=None, first_name=None):
+def add_subscriber(chat_id, username=None, first_name=None, timezone='UTC'):
     """Add a user to daily verse subscribers"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
         cursor.execute('''
-            INSERT OR REPLACE INTO subscribers (chat_id, username, first_name, subscribed_date)
-            VALUES (?, ?, ?, ?)
-        ''', (chat_id, username, first_name, date.today().isoformat()))
+            INSERT OR REPLACE INTO subscribers (chat_id, username, first_name, subscribed_date, timezone)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (chat_id, username, first_name, date.today().isoformat(), timezone))
         conn.commit()
         success = True
     except Exception as e:
@@ -69,6 +87,27 @@ def add_subscriber(chat_id, username=None, first_name=None):
         success = False
     conn.close()
     return success
+
+
+def update_subscriber_timezone(chat_id, timezone):
+    """Update subscriber's timezone"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('UPDATE subscribers SET timezone = ? WHERE chat_id = ?', (timezone, chat_id))
+    conn.commit()
+    rows_updated = cursor.rowcount
+    conn.close()
+    return rows_updated > 0
+
+
+def get_subscriber_timezone(chat_id):
+    """Get subscriber's timezone"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT timezone FROM subscribers WHERE chat_id = ?', (chat_id,))
+    result = cursor.fetchone()
+    conn.close()
+    return result[0] if result else None
 
 
 def remove_subscriber(chat_id):
@@ -93,13 +132,13 @@ def is_subscribed(chat_id):
 
 
 def get_all_subscribers():
-    """Get all subscriber chat IDs"""
+    """Get all subscriber chat IDs with their timezones"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('SELECT chat_id FROM subscribers')
+    cursor.execute('SELECT chat_id, timezone FROM subscribers')
     results = cursor.fetchall()
     conn.close()
-    return [r[0] for r in results]
+    return results
 
 
 def get_subscriber_count():
@@ -258,7 +297,12 @@ def get_verses_by_topic(topic_name, limit=5):
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     subscribed = is_subscribed(chat_id)
-    sub_status = "✅ Subscribed to daily verses" if subscribed else "❌ Not subscribed yet"
+    
+    if subscribed:
+        tz = get_subscriber_timezone(chat_id)
+        sub_status = f"✅ Subscribed (Timezone: {tz})"
+    else:
+        sub_status = "❌ Not subscribed yet"
     
     welcome = f"""
 🙏 *Welcome to Bible Bot!*
@@ -283,6 +327,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /random - Random verse
 /subscribe - Get daily verses at 6 AM
 /unsubscribe - Stop daily verses
+/settimezone - Set your timezone
 
 /help - Show all commands
 """
@@ -316,12 +361,52 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /random - Random verse
 /subscribe - Auto daily verse at 6 AM
 /unsubscribe - Stop daily verses
+/settimezone - Set your timezone
 /mystatus - Check subscription
 
 *💡 Topics Available:*
 salvation, love, faith, prayer, hope, peace, strength, forgiveness, fear, healing, wisdom, anxiety, joy, marriage, money, death, heaven, anger, patience, trust
 """
     await update.message.reply_text(help_text, parse_mode='Markdown')
+
+
+async def settimezone_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Let user set their timezone"""
+    chat_id = update.effective_chat.id
+    
+    # Check if user provided a number
+    if context.args:
+        choice = context.args[0]
+        if choice in TIMEZONE_OPTIONS:
+            tz_name, tz_value = TIMEZONE_OPTIONS[choice]
+            
+            if is_subscribed(chat_id):
+                update_subscriber_timezone(chat_id, tz_value)
+                await update.message.reply_text(
+                    f"✅ *Timezone updated!*\n\n"
+                    f"🌍 {tz_name}\n"
+                    f"⏰ You'll receive daily verses at 6:00 AM your local time!",
+                    parse_mode='Markdown'
+                )
+            else:
+                # Save timezone for when they subscribe
+                context.user_data['timezone'] = tz_value
+                await update.message.reply_text(
+                    f"✅ *Timezone set!*\n\n"
+                    f"🌍 {tz_name}\n\n"
+                    f"Now use /subscribe to receive daily verses at 6 AM!",
+                    parse_mode='Markdown'
+                )
+            return
+    
+    # Show timezone options
+    response = "🌍 *Select Your Timezone*\n\n"
+    for key, (name, _) in TIMEZONE_OPTIONS.items():
+        response += f"{key}. {name}\n"
+    response += "\n*Usage:* /settimezone <number>\n"
+    response += "*Example:* /settimezone 1"
+    
+    await update.message.reply_text(response, parse_mode='Markdown')
 
 
 async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -332,21 +417,49 @@ async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     first_name = user.first_name if user else None
     
     if is_subscribed(chat_id):
+        tz = get_subscriber_timezone(chat_id)
         await update.message.reply_text(
-            "✅ You're already subscribed to daily verses!\n\n"
-            f"📅 You'll receive verses every day at {DAILY_HOUR}:00 AM\n\n"
-            "Use /unsubscribe to stop."
+            f"✅ You're already subscribed!\n\n"
+            f"🌍 Timezone: {tz}\n"
+            f"⏰ Daily verse at 6:00 AM your time\n\n"
+            f"Use /settimezone to change timezone\n"
+            f"Use /unsubscribe to stop."
         )
         return
     
-    if add_subscriber(chat_id, username, first_name):
+    # Get timezone from user_data or ask them to set it
+    timezone = context.user_data.get('timezone', None)
+    
+    if not timezone:
+        # Show timezone selection first
+        response = "🌍 *Please set your timezone first!*\n\n"
+        for key, (name, _) in TIMEZONE_OPTIONS.items():
+            response += f"{key}. {name}\n"
+        response += "\n*Usage:* /settimezone <number>\n"
+        response += "*Example:* /settimezone 1\n\n"
+        response += "Then use /subscribe again!"
+        
+        await update.message.reply_text(response, parse_mode='Markdown')
+        return
+    
+    if add_subscriber(chat_id, username, first_name, timezone):
         total = get_subscriber_count()
+        
+        # Get timezone display name
+        tz_display = timezone
+        for key, (name, value) in TIMEZONE_OPTIONS.items():
+            if value == timezone:
+                tz_display = name
+                break
+        
         await update.message.reply_text(
-            "🎉 *Successfully subscribed!*\n\n"
-            f"📅 You'll receive a verse every day at {DAILY_HOUR}:00 AM\n\n"
+            f"🎉 *Successfully subscribed!*\n\n"
+            f"🌍 Timezone: {tz_display}\n"
+            f"⏰ Daily verse at 6:00 AM your local time!\n\n"
             f"👥 Total subscribers: {total}\n\n"
-            "Use /unsubscribe anytime to stop.\n"
-            "Use /votd to get today's verse now!",
+            f"Use /settimezone to change timezone\n"
+            f"Use /unsubscribe to stop\n"
+            f"Use /votd to get today's verse now!",
             parse_mode='Markdown'
         )
     else:
@@ -381,16 +494,28 @@ async def mystatus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if is_subscribed(chat_id):
         total = get_subscriber_count()
+        tz = get_subscriber_timezone(chat_id)
+        
+        # Get timezone display name
+        tz_display = tz
+        for key, (name, value) in TIMEZONE_OPTIONS.items():
+            if value == tz:
+                tz_display = name
+                break
+        
         response = (
-            "✅ *You are subscribed!*\n\n"
-            f"📅 Daily verse time: {DAILY_HOUR}:00 AM\n"
+            f"✅ *You are subscribed!*\n\n"
+            f"🌍 Timezone: {tz_display}\n"
+            f"⏰ Daily verse: 6:00 AM your local time\n"
             f"👥 Total subscribers: {total}\n\n"
-            "Use /unsubscribe to stop."
+            f"Use /settimezone to change timezone\n"
+            f"Use /unsubscribe to stop."
         )
     else:
         response = (
             "❌ *You are not subscribed*\n\n"
-            "Use /subscribe to get daily verses automatically!"
+            "Use /settimezone to set your timezone\n"
+            "Then /subscribe to get daily verses at 6 AM!"
         )
     
     await update.message.reply_text(response, parse_mode='Markdown')
@@ -586,13 +711,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ============================================
-# DAILY VERSE AUTO-SEND
+# DAILY VERSE AUTO-SEND (TIMEZONE AWARE)
 # ============================================
 
-async def send_daily_verse(context: ContextTypes.DEFAULT_TYPE):
-    """Send daily verse to all subscribers automatically"""
-    verse = get_verse_of_the_day()
+async def check_and_send_daily_verses(context: ContextTypes.DEFAULT_TYPE):
+    """Check every hour and send verses to users where it's 6 AM"""
     
+    subscribers = get_all_subscribers()
+    
+    if not subscribers:
+        return
+    
+    verse = get_verse_of_the_day()
     if not verse:
         print("❌ Could not get verse for daily send")
         return
@@ -607,29 +737,32 @@ async def send_daily_verse(context: ContextTypes.DEFAULT_TYPE):
     message += "🙏 Have a blessed day!\n\n"
     message += "_Reply /unsubscribe to stop daily verses_"
     
-    subscribers = get_all_subscribers()
-    success_count = 0
-    fail_count = 0
+    sent_count = 0
     
-    print(f"📤 Sending daily verse to {len(subscribers)} subscribers...")
-    
-    for chat_id in subscribers:
+    for chat_id, timezone_str in subscribers:
         try:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=message,
-                parse_mode='Markdown'
-            )
-            success_count += 1
+            # Get current time in user's timezone
+            tz = pytz.timezone(timezone_str) if timezone_str else pytz.UTC
+            user_time = datetime.now(tz)
+            
+            # Check if it's 6 AM (between 6:00 and 6:59) in user's timezone
+            if user_time.hour == 6:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=message,
+                    parse_mode='Markdown'
+                )
+                sent_count += 1
+                print(f"✅ Sent to {chat_id} (TZ: {timezone_str}, Local: {user_time.strftime('%H:%M')})")
+                
         except Exception as e:
             print(f"❌ Failed to send to {chat_id}: {e}")
-            # Remove invalid subscribers (blocked bot, deleted account)
             if "blocked" in str(e).lower() or "not found" in str(e).lower():
                 remove_subscriber(chat_id)
                 print(f"🗑️ Removed invalid subscriber: {chat_id}")
-            fail_count += 1
     
-    print(f"✅ Daily verse sent: {success_count} success, {fail_count} failed")
+    if sent_count > 0:
+        print(f"📤 Daily verses sent to {sent_count} subscribers this hour")
 
 
 # ============================================
@@ -671,16 +804,17 @@ def main():
     bot_app.add_handler(CommandHandler("subscribe", subscribe_command))
     bot_app.add_handler(CommandHandler("unsubscribe", unsubscribe_command))
     bot_app.add_handler(CommandHandler("mystatus", mystatus_command))
+    bot_app.add_handler(CommandHandler("settimezone", settimezone_command))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    # Schedule daily verse at 6 AM
+    # Run timezone check every hour
     job_queue = bot_app.job_queue
-    job_queue.run_daily(
-        send_daily_verse,
-        time=time(hour=DAILY_HOUR, minute=DAILY_MINUTE),
-        name="daily_verse"
+    job_queue.run_repeating(
+        check_and_send_daily_verses,
+        interval=3600,  # Every hour (3600 seconds)
+        first=10  # Start 10 seconds after boot
     )
-    print(f"📅 Daily verse scheduled for {DAILY_HOUR}:{DAILY_MINUTE:02d} AM")
+    print("📅 Hourly timezone check scheduled")
     
     subscriber_count = get_subscriber_count()
     print(f"👥 Current subscribers: {subscriber_count}")
