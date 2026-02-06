@@ -487,6 +487,49 @@ async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         await update.message.reply_text("❌ Failed to unsubscribe. Please try again.")
 
+async def testdaily_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Test daily verse sending (for debugging)"""
+    chat_id = update.effective_chat.id
+    
+    # Check if subscribed
+    if not is_subscribed(chat_id):
+        await update.message.reply_text("❌ You're not subscribed. Use /subscribe first.")
+        return
+    
+    tz_str = get_subscriber_timezone(chat_id)
+    
+    # Get user's current time
+    try:
+        tz = pytz.timezone(tz_str) if tz_str else pytz.UTC
+        user_time = datetime.now(tz)
+    except:
+        tz = pytz.UTC
+        user_time = datetime.now(tz)
+    
+    await update.message.reply_text(
+        f"🔍 *Debug Info:*\n\n"
+        f"📍 Your timezone: `{tz_str}`\n"
+        f"🕐 Your local time: `{user_time.strftime('%H:%M:%S')}`\n"
+        f" Your local date: `{user_time.strftime('%Y-%m-%d')}`\n\n"
+        f"Sending test verse now...",
+        parse_mode='Markdown'
+    )
+    
+    # Send test verse
+    verse = get_verse_of_the_day()
+    if verse:
+        book, chapter, verse_num, text = verse
+        today = date.today().strftime("%B %d, %Y")
+        
+        message = f"🌅 *Test Daily Verse*\n"
+        message += f" _{today}_\n\n"
+        message += f"📖 *{book} {chapter}:{verse_num}*\n\n"
+        message += f"_{text}_\n\n"
+        message += "🙏 Have a blessed day!"
+        
+        await update.message.reply_text(message, parse_mode='Markdown')
+    else:
+        await update.message.reply_text("❌ Could not get verse.")
 
 async def mystatus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Check subscription status"""
@@ -527,7 +570,7 @@ async def votd_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         book, chapter, verse_num, text = verse
         today = date.today().strftime("%B %d, %Y")
         response = f"🌅 *Verse of the Day*\n"
-        response += f"📅 _{today}_\n\n"
+        response += f" _{today}_\n\n"
         response += f"📖 *{book} {chapter}:{verse_num}*\n\n"
         response += f"_{text}_\n\n"
         response += "🙏 Have a blessed day!"
@@ -717,10 +760,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def check_and_send_daily_verses(context: ContextTypes.DEFAULT_TYPE):
     """Check every hour and send verses to users where it's 6 AM"""
     
+    print(f"⏰ Hourly check running at {datetime.now(pytz.UTC).strftime('%Y-%m-%d %H:%M:%S')} UTC")
+    
     subscribers = get_all_subscribers()
     
     if not subscribers:
+        print("📭 No subscribers found")
         return
+    
+    print(f"👥 Checking {len(subscribers)} subscribers...")
     
     verse = get_verse_of_the_day()
     if not verse:
@@ -731,7 +779,7 @@ async def check_and_send_daily_verses(context: ContextTypes.DEFAULT_TYPE):
     today = date.today().strftime("%B %d, %Y")
     
     message = f"🌅 *Good Morning! Daily Verse*\n"
-    message += f"📅 _{today}_\n\n"
+    message += f" _{today}_\n\n"
     message += f"📖 *{book} {chapter}:{verse_num}*\n\n"
     message += f"_{text}_\n\n"
     message += "🙏 Have a blessed day!\n\n"
@@ -741,11 +789,17 @@ async def check_and_send_daily_verses(context: ContextTypes.DEFAULT_TYPE):
     
     for chat_id, timezone_str in subscribers:
         try:
+            # Default to UTC if no timezone
+            if not timezone_str:
+                timezone_str = 'UTC'
+            
             # Get current time in user's timezone
-            tz = pytz.timezone(timezone_str) if timezone_str else pytz.UTC
+            tz = pytz.timezone(timezone_str)
             user_time = datetime.now(tz)
             
-            # Check if it's 6 AM (between 6:00 and 6:59) in user's timezone
+            print(f"  👤 User {chat_id}: TZ={timezone_str}, LocalTime={user_time.strftime('%H:%M')}")
+            
+            # Check if it's 6 AM (hour = 6) in user's timezone
             if user_time.hour == 6:
                 await context.bot.send_message(
                     chat_id=chat_id,
@@ -753,17 +807,15 @@ async def check_and_send_daily_verses(context: ContextTypes.DEFAULT_TYPE):
                     parse_mode='Markdown'
                 )
                 sent_count += 1
-                print(f"✅ Sent to {chat_id} (TZ: {timezone_str}, Local: {user_time.strftime('%H:%M')})")
+                print(f"  ✅ Sent to {chat_id}")
                 
         except Exception as e:
-            print(f"❌ Failed to send to {chat_id}: {e}")
+            print(f"  ❌ Error for {chat_id}: {e}")
             if "blocked" in str(e).lower() or "not found" in str(e).lower():
                 remove_subscriber(chat_id)
-                print(f"🗑️ Removed invalid subscriber: {chat_id}")
+                print(f"  🗑️ Removed invalid subscriber: {chat_id}")
     
-    if sent_count > 0:
-        print(f"📤 Daily verses sent to {sent_count} subscribers this hour")
-
+    print(f"📤 Hourly check complete: {sent_count} messages sent")
 
 # ============================================
 # MAIN FUNCTION
@@ -804,6 +856,7 @@ def main():
     bot_app.add_handler(CommandHandler("subscribe", subscribe_command))
     bot_app.add_handler(CommandHandler("unsubscribe", unsubscribe_command))
     bot_app.add_handler(CommandHandler("mystatus", mystatus_command))
+    bot_app.add_handler(CommandHandler("testdaily", testdaily_command))
     bot_app.add_handler(CommandHandler("settimezone", settimezone_command))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
@@ -814,7 +867,7 @@ def main():
         interval=3600,  # Every hour (3600 seconds)
         first=10  # Start 10 seconds after boot
     )
-    print("📅 Hourly timezone check scheduled")
+    print(" Hourly timezone check scheduled")
     
     subscriber_count = get_subscriber_count()
     print(f"👥 Current subscribers: {subscriber_count}")
