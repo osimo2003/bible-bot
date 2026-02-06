@@ -9,12 +9,9 @@ from threading import Thread
 import pytz
 
 
-# GET TOKEN FROM ENVIRONMENT VARIABLE (SECURE)
 TOKEN = os.environ.get("BOT_TOKEN")
-
 DB_PATH = "bible.db"
 
-# Common timezones for easy selection
 TIMEZONE_OPTIONS = {
     "1": ("🇬🇧 UK (London)", "Europe/London"),
     "2": ("🇺🇸 US Eastern (New York)", "America/New_York"),
@@ -33,7 +30,6 @@ TIMEZONE_OPTIONS = {
     "15": ("🇵🇭 Philippines (Manila)", "Asia/Manila"),
 }
 
-
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
@@ -46,15 +42,11 @@ def run_flask():
 
 def keep_alive():
     t = Thread(target=run_flask)
+    t.daemon = True
     t.start()
 
 
-# ============================================
-# DATABASE SETUP FOR SUBSCRIBERS
-# ============================================
-
 def setup_subscribers_table():
-    """Create subscribers table if it doesn't exist"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
@@ -68,11 +60,10 @@ def setup_subscribers_table():
     ''')
     conn.commit()
     conn.close()
-    print("✅ Subscribers table ready")
+    print("✅ Subscribers table ready", flush=True)
 
 
 def add_subscriber(chat_id, username=None, first_name=None, timezone='UTC'):
-    """Add a user to daily verse subscribers"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
@@ -83,14 +74,13 @@ def add_subscriber(chat_id, username=None, first_name=None, timezone='UTC'):
         conn.commit()
         success = True
     except Exception as e:
-        print(f"Error adding subscriber: {e}")
+        print(f"Error adding subscriber: {e}", flush=True)
         success = False
     conn.close()
     return success
 
 
 def update_subscriber_timezone(chat_id, timezone):
-    """Update subscriber's timezone"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('UPDATE subscribers SET timezone = ? WHERE chat_id = ?', (timezone, chat_id))
@@ -101,7 +91,6 @@ def update_subscriber_timezone(chat_id, timezone):
 
 
 def get_subscriber_timezone(chat_id):
-    """Get subscriber's timezone"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('SELECT timezone FROM subscribers WHERE chat_id = ?', (chat_id,))
@@ -111,7 +100,6 @@ def get_subscriber_timezone(chat_id):
 
 
 def remove_subscriber(chat_id):
-    """Remove a user from daily verse subscribers"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('DELETE FROM subscribers WHERE chat_id = ?', (chat_id,))
@@ -122,7 +110,6 @@ def remove_subscriber(chat_id):
 
 
 def is_subscribed(chat_id):
-    """Check if user is subscribed"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('SELECT chat_id FROM subscribers WHERE chat_id = ?', (chat_id,))
@@ -132,7 +119,6 @@ def is_subscribed(chat_id):
 
 
 def get_all_subscribers():
-    """Get all subscriber chat IDs with their timezones"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('SELECT chat_id, timezone FROM subscribers')
@@ -142,7 +128,6 @@ def get_all_subscribers():
 
 
 def get_subscriber_count():
-    """Get total number of subscribers"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('SELECT COUNT(*) FROM subscribers')
@@ -150,10 +135,6 @@ def get_subscriber_count():
     conn.close()
     return count
 
-
-# ============================================
-# BIBLE DATABASE FUNCTIONS
-# ============================================
 
 def search_bible(keyword, limit=5):
     conn = sqlite3.connect(DB_PATH)
@@ -290,10 +271,6 @@ def get_verses_by_topic(topic_name, limit=5):
     return results
 
 
-# ============================================
-# BOT COMMANDS
-# ============================================
-
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     subscribed = is_subscribed(chat_id)
@@ -328,6 +305,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /subscribe - Get daily verses at 6 AM
 /unsubscribe - Stop daily verses
 /settimezone - Set your timezone
+/mystatus - Check subscription
 
 /help - Show all commands
 """
@@ -346,7 +324,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 *📍 Get Specific Verses:*
 /verse John 3:16
 /verse Genesis 1:1
-/verse Psalm 23:1
 
 *📄 Get Chapters:*
 /chapter John 3
@@ -363,18 +340,17 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /unsubscribe - Stop daily verses
 /settimezone - Set your timezone
 /mystatus - Check subscription
+/testdaily - Test daily verse
 
-*💡 Topics Available:*
-salvation, love, faith, prayer, hope, peace, strength, forgiveness, fear, healing, wisdom, anxiety, joy, marriage, money, death, heaven, anger, patience, trust
+*💡 Topics:*
+salvation, love, faith, prayer, hope, peace, strength, forgiveness, fear, healing, wisdom, anxiety, joy
 """
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
 
 async def settimezone_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Let user set their timezone"""
     chat_id = update.effective_chat.id
     
-    # Check if user provided a number
     if context.args:
         choice = context.args[0]
         if choice in TIMEZONE_OPTIONS:
@@ -389,7 +365,6 @@ async def settimezone_command(update: Update, context: ContextTypes.DEFAULT_TYPE
                     parse_mode='Markdown'
                 )
             else:
-                # Save timezone for when they subscribe
                 context.user_data['timezone'] = tz_value
                 await update.message.reply_text(
                     f"✅ *Timezone set!*\n\n"
@@ -399,7 +374,6 @@ async def settimezone_command(update: Update, context: ContextTypes.DEFAULT_TYPE
                 )
             return
     
-    # Show timezone options
     response = "🌍 *Select Your Timezone*\n\n"
     for key, (name, _) in TIMEZONE_OPTIONS.items():
         response += f"{key}. {name}\n"
@@ -410,7 +384,6 @@ async def settimezone_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Subscribe user to daily verses"""
     chat_id = update.effective_chat.id
     user = update.effective_user
     username = user.username if user else None
@@ -427,25 +400,20 @@ async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Get timezone from user_data or ask them to set it
     timezone = context.user_data.get('timezone', None)
     
     if not timezone:
-        # Show timezone selection first
         response = "🌍 *Please set your timezone first!*\n\n"
         for key, (name, _) in TIMEZONE_OPTIONS.items():
             response += f"{key}. {name}\n"
         response += "\n*Usage:* /settimezone <number>\n"
         response += "*Example:* /settimezone 1\n\n"
         response += "Then use /subscribe again!"
-        
         await update.message.reply_text(response, parse_mode='Markdown')
         return
     
     if add_subscriber(chat_id, username, first_name, timezone):
         total = get_subscriber_count()
-        
-        # Get timezone display name
         tz_display = timezone
         for key, (name, value) in TIMEZONE_OPTIONS.items():
             if value == timezone:
@@ -467,7 +435,6 @@ async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Unsubscribe user from daily verses"""
     chat_id = update.effective_chat.id
     
     if not is_subscribed(chat_id):
@@ -487,59 +454,13 @@ async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         await update.message.reply_text("❌ Failed to unsubscribe. Please try again.")
 
-async def testdaily_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Test daily verse sending (for debugging)"""
-    chat_id = update.effective_chat.id
-    
-    # Check if subscribed
-    if not is_subscribed(chat_id):
-        await update.message.reply_text("❌ You're not subscribed. Use /subscribe first.")
-        return
-    
-    tz_str = get_subscriber_timezone(chat_id)
-    
-    # Get user's current time
-    try:
-        tz = pytz.timezone(tz_str) if tz_str else pytz.UTC
-        user_time = datetime.now(tz)
-    except:
-        tz = pytz.UTC
-        user_time = datetime.now(tz)
-    
-    await update.message.reply_text(
-        f"🔍 *Debug Info:*\n\n"
-        f"📍 Your timezone: `{tz_str}`\n"
-        f"🕐 Your local time: `{user_time.strftime('%H:%M:%S')}`\n"
-        f" Your local date: `{user_time.strftime('%Y-%m-%d')}`\n\n"
-        f"Sending test verse now...",
-        parse_mode='Markdown'
-    )
-    
-    # Send test verse
-    verse = get_verse_of_the_day()
-    if verse:
-        book, chapter, verse_num, text = verse
-        today = date.today().strftime("%B %d, %Y")
-        
-        message = f"🌅 *Test Daily Verse*\n"
-        message += f" _{today}_\n\n"
-        message += f"📖 *{book} {chapter}:{verse_num}*\n\n"
-        message += f"_{text}_\n\n"
-        message += "🙏 Have a blessed day!"
-        
-        await update.message.reply_text(message, parse_mode='Markdown')
-    else:
-        await update.message.reply_text("❌ Could not get verse.")
 
 async def mystatus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Check subscription status"""
     chat_id = update.effective_chat.id
     
     if is_subscribed(chat_id):
         total = get_subscriber_count()
         tz = get_subscriber_timezone(chat_id)
-        
-        # Get timezone display name
         tz_display = tz
         for key, (name, value) in TIMEZONE_OPTIONS.items():
             if value == tz:
@@ -564,16 +485,51 @@ async def mystatus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(response, parse_mode='Markdown')
 
 
+async def testdaily_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    
+    if not is_subscribed(chat_id):
+        await update.message.reply_text("❌ You're not subscribed. Use /subscribe first.")
+        return
+    
+    tz_str = get_subscriber_timezone(chat_id)
+    
+    try:
+        tz = pytz.timezone(tz_str) if tz_str else pytz.UTC
+        user_time = datetime.now(tz)
+    except:
+        tz = pytz.UTC
+        user_time = datetime.now(tz)
+    
+    await update.message.reply_text(
+        f"🔍 *Debug Info:*\n\n"
+        f"📍 Your timezone: `{tz_str}`\n"
+        f"🕐 Your local time: `{user_time.strftime('%H:%M:%S')}`\n"
+        f"📅 Your local date: `{user_time.strftime('%Y-%m-%d')}`\n\n"
+        f"Sending test verse now...",
+        parse_mode='Markdown'
+    )
+    
+    verse = get_verse_of_the_day()
+    if verse:
+        book, chapter, verse_num, text = verse
+        today = date.today().strftime("%B %d, %Y")
+        message = f"🌅 *Test Daily Verse*\n"
+        message += f"📅 _{today}_\n\n"
+        message += f"📖 *{book} {chapter}:{verse_num}*\n\n"
+        message += f"_{text}_\n\n"
+        message += "🙏 Have a blessed day!"
+        await update.message.reply_text(message, parse_mode='Markdown')
+    else:
+        await update.message.reply_text("❌ Could not get verse.")
+
+
 async def votd_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     verse = get_verse_of_the_day()
     if verse:
         book, chapter, verse_num, text = verse
         today = date.today().strftime("%B %d, %Y")
-        response = f"🌅 *Verse of the Day*\n"
-        response += f" _{today}_\n\n"
-        response += f"📖 *{book} {chapter}:{verse_num}*\n\n"
-        response += f"_{text}_\n\n"
-        response += "🙏 Have a blessed day!"
+        response = f"🌅 *Verse of the Day*\n📅 _{today}_\n\n📖 *{book} {chapter}:{verse_num}*\n\n_{text}_\n\n🙏 Have a blessed day!"
     else:
         response = "❌ Could not get verse of the day."
     await update.message.reply_text(response, parse_mode='Markdown')
@@ -583,9 +539,7 @@ async def random_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     verse = get_random_verse()
     if verse:
         book, chapter, verse_num, text = verse
-        response = f"🎲 *Random Verse*\n\n"
-        response += f"📖 *{book} {chapter}:{verse_num}*\n\n"
-        response += f"_{text}_"
+        response = f"🎲 *Random Verse*\n\n📖 *{book} {chapter}:{verse_num}*\n\n_{text}_"
     else:
         response = "❌ Could not get a random verse."
     await update.message.reply_text(response, parse_mode='Markdown')
@@ -602,8 +556,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     response = f"🔍 *Found {len(results)} verse(s) for '{keyword}':*\n\n"
     for book, chapter, verse, text in results:
-        response += f"📖 *{book} {chapter}:{verse}*\n"
-        response += f"_{text}_\n\n"
+        response += f"📖 *{book} {chapter}:{verse}*\n_{text}_\n\n"
     await update.message.reply_text(response, parse_mode='Markdown')
 
 
@@ -612,16 +565,14 @@ async def topics_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     response = "📚 *Available Topics:*\n\n"
     for i, topic in enumerate(topics, 1):
         response += f"{i}. {topic.title()}\n"
-    response += "\n*Usage:* /topic <name>\n"
-    response += "*Example:* /topic salvation"
+    response += "\n*Usage:* /topic <name>\n*Example:* /topic salvation"
     await update.message.reply_text(response, parse_mode='Markdown')
 
 
 async def topic_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         topics = get_all_topics()
-        response = "Please provide a topic name.\n\n"
-        response += "*Available topics:*\n"
+        response = "Please provide a topic name.\n\n*Available topics:*\n"
         response += ", ".join([t.title() for t in topics])
         response += "\n\n*Example:* /topic salvation"
         await update.message.reply_text(response, parse_mode='Markdown')
@@ -630,32 +581,24 @@ async def topic_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     results = get_verses_by_topic(topic_name)
     if not results:
         topics = get_all_topics()
-        response = f"❌ Topic '{topic_name}' not found.\n\n"
-        response += "*Available topics:*\n"
+        response = f"❌ Topic '{topic_name}' not found.\n\n*Available topics:*\n"
         response += ", ".join([t.title() for t in topics])
         await update.message.reply_text(response, parse_mode='Markdown')
         return
     response = f"📚 *Topic: {topic_name.title()}*\n\n"
     for book, chapter, verse, text in results:
-        response += f"📖 *{book} {chapter}:{verse}*\n"
-        response += f"_{text}_\n\n"
+        response += f"📖 *{book} {chapter}:{verse}*\n_{text}_\n\n"
     await update.message.reply_text(response, parse_mode='Markdown')
 
 
 async def verse_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text(
-            "Please provide book, chapter and verse.\n\n"
-            "Examples:\n"
-            "/verse John 3:16\n"
-            "/verse Genesis 1:1\n"
-            "/verse Psalm 23:1"
-        )
+        await update.message.reply_text("Please provide book, chapter and verse.\n\nExample: /verse John 3:16")
         return
     text = ' '.join(context.args)
     try:
         if ':' not in text:
-            await update.message.reply_text("Please use format: /verse Book Chapter:Verse\n\nExample: /verse John 3:16")
+            await update.message.reply_text("Please use format: /verse Book Chapter:Verse")
             return
         parts = text.rsplit(' ', 1)
         book_name = parts[0]
@@ -663,8 +606,8 @@ async def verse_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chapter, verse = chapter_verse.split(':')
         chapter = int(chapter)
         verse = int(verse)
-    except (ValueError, IndexError):
-        await update.message.reply_text("Please use format: /verse Book Chapter:Verse\n\nExample: /verse John 3:16")
+    except:
+        await update.message.reply_text("Please use format: /verse Book Chapter:Verse")
         return
     result = get_specific_verse(book_name, chapter, verse)
     if result:
@@ -677,20 +620,15 @@ async def verse_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def chapter_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text(
-            "Please provide book and chapter.\n\n"
-            "Examples:\n"
-            "/chapter John 3\n"
-            "/chapter Psalm 23"
-        )
+        await update.message.reply_text("Please provide book and chapter.\n\nExample: /chapter Psalm 23")
         return
     text = ' '.join(context.args)
     try:
         parts = text.rsplit(' ', 1)
         book_name = parts[0]
         chapter = int(parts[1])
-    except (ValueError, IndexError):
-        await update.message.reply_text("Please use format: /chapter Book Chapter\n\nExample: /chapter John 3")
+    except:
+        await update.message.reply_text("Please use format: /chapter Book Chapter")
         return
     results = get_chapter(book_name, chapter)
     if not results:
@@ -706,12 +644,7 @@ async def chapter_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def book_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text(
-            "Please provide a book name.\n\n"
-            "Examples:\n"
-            "/book John\n"
-            "/book Genesis"
-        )
+        await update.message.reply_text("Please provide a book name.\n\nExample: /book John")
         return
     book_name = ' '.join(context.args)
     results = search_by_book(book_name)
@@ -720,8 +653,7 @@ async def book_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     response = f"📚 *Verses from {book_name.title()}:*\n\n"
     for book, chapter, verse, text in results:
-        response += f"📖 *{book} {chapter}:{verse}*\n"
-        response += f"_{text}_\n\n"
+        response += f"📖 *{book} {chapter}:{verse}*\n_{text}_\n\n"
     await update.message.reply_text(response, parse_mode='Markdown')
 
 
@@ -729,12 +661,9 @@ async def books_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     books = get_all_books()
     old_testament = [b[0] for b in books if b[1] == "Old"]
     new_testament = [b[0] for b in books if b[1] == "New"]
-    response = "📚 *Bible Books*\n\n"
-    response += "*Old Testament (39):*\n"
-    response += ", ".join(old_testament[:20]) + "\n"
-    response += ", ".join(old_testament[20:]) + "\n\n"
-    response += "*New Testament (27):*\n"
-    response += ", ".join(new_testament)
+    response = "📚 *Bible Books*\n\n*Old Testament (39):*\n"
+    response += ", ".join(old_testament[:20]) + "\n" + ", ".join(old_testament[20:]) + "\n\n"
+    response += "*New Testament (27):*\n" + ", ".join(new_testament)
     await update.message.reply_text(response, parse_mode='Markdown')
 
 
@@ -748,38 +677,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     response = f"🔍 *Found {len(results)} verse(s) for '{keyword}':*\n\n"
     for book, chapter, verse, text in results:
-        response += f"📖 *{book} {chapter}:{verse}*\n"
-        response += f"_{text}_\n\n"
+        response += f"📖 *{book} {chapter}:{verse}*\n_{text}_\n\n"
     await update.message.reply_text(response, parse_mode='Markdown')
 
 
-# ============================================
-# DAILY VERSE AUTO-SEND (TIMEZONE AWARE)
-# ============================================
-
 async def check_and_send_daily_verses(context: ContextTypes.DEFAULT_TYPE):
-    """Check every hour and send verses to users where it's 6 AM"""
-    
-    print(f"⏰ Hourly check running at {datetime.now(pytz.UTC).strftime('%Y-%m-%d %H:%M:%S')} UTC")
+    print(f"⏰ Hourly check running at {datetime.now(pytz.UTC).strftime('%Y-%m-%d %H:%M:%S')} UTC", flush=True)
     
     subscribers = get_all_subscribers()
     
     if not subscribers:
-        print("📭 No subscribers found")
+        print("📭 No subscribers found", flush=True)
         return
     
-    print(f"👥 Checking {len(subscribers)} subscribers...")
+    print(f"👥 Checking {len(subscribers)} subscribers...", flush=True)
     
     verse = get_verse_of_the_day()
     if not verse:
-        print("❌ Could not get verse for daily send")
+        print("❌ Could not get verse for daily send", flush=True)
         return
     
     book, chapter, verse_num, text = verse
     today = date.today().strftime("%B %d, %Y")
     
     message = f"🌅 *Good Morning! Daily Verse*\n"
-    message += f" _{today}_\n\n"
+    message += f"📅 _{today}_\n\n"
     message += f"📖 *{book} {chapter}:{verse_num}*\n\n"
     message += f"_{text}_\n\n"
     message += "🙏 Have a blessed day!\n\n"
@@ -789,17 +711,14 @@ async def check_and_send_daily_verses(context: ContextTypes.DEFAULT_TYPE):
     
     for chat_id, timezone_str in subscribers:
         try:
-            # Default to UTC if no timezone
             if not timezone_str:
                 timezone_str = 'UTC'
             
-            # Get current time in user's timezone
             tz = pytz.timezone(timezone_str)
             user_time = datetime.now(tz)
             
-            print(f"  👤 User {chat_id}: TZ={timezone_str}, LocalTime={user_time.strftime('%H:%M')}")
+            print(f"  👤 User {chat_id}: TZ={timezone_str}, LocalTime={user_time.strftime('%H:%M')}", flush=True)
             
-            # Check if it's 6 AM (hour = 6) in user's timezone
             if user_time.hour == 6:
                 await context.bot.send_message(
                     chat_id=chat_id,
@@ -807,41 +726,31 @@ async def check_and_send_daily_verses(context: ContextTypes.DEFAULT_TYPE):
                     parse_mode='Markdown'
                 )
                 sent_count += 1
-                print(f"  ✅ Sent to {chat_id}")
+                print(f"  ✅ Sent to {chat_id}", flush=True)
                 
         except Exception as e:
-            print(f"  ❌ Error for {chat_id}: {e}")
+            print(f"  ❌ Error for {chat_id}: {e}", flush=True)
             if "blocked" in str(e).lower() or "not found" in str(e).lower():
                 remove_subscriber(chat_id)
-                print(f"  🗑️ Removed invalid subscriber: {chat_id}")
+                print(f"  🗑️ Removed invalid subscriber: {chat_id}", flush=True)
     
-    print(f"📤 Hourly check complete: {sent_count} messages sent")
+    print(f"📤 Hourly check complete: {sent_count} messages sent", flush=True)
 
-# ============================================
-# MAIN FUNCTION
-# ============================================
 
 def main():
-    # Check if token exists
     if not TOKEN:
-        print("❌ ERROR: BOT_TOKEN environment variable not set!")
-        print("Set it with: export BOT_TOKEN=your_token_here")
+        print("❌ ERROR: BOT_TOKEN environment variable not set!", flush=True)
         return
     
-    print("=" * 50)
-    print("🤖 Starting Bible Bot...")
-    print("=" * 50)
+    print("=" * 50, flush=True)
+    print("🤖 Starting Bible Bot...", flush=True)
+    print("=" * 50, flush=True)
     
-    # Setup subscribers table
     setup_subscribers_table()
-    
-    # Start Flask server for keep-alive
     keep_alive()
     
-    # Create bot application
     bot_app = Application.builder().token(TOKEN).build()
     
-    # Add command handlers
     bot_app.add_handler(CommandHandler("start", start_command))
     bot_app.add_handler(CommandHandler("help", help_command))
     bot_app.add_handler(CommandHandler("votd", votd_command))
@@ -856,23 +765,21 @@ def main():
     bot_app.add_handler(CommandHandler("subscribe", subscribe_command))
     bot_app.add_handler(CommandHandler("unsubscribe", unsubscribe_command))
     bot_app.add_handler(CommandHandler("mystatus", mystatus_command))
-    bot_app.add_handler(CommandHandler("testdaily", testdaily_command))
     bot_app.add_handler(CommandHandler("settimezone", settimezone_command))
+    bot_app.add_handler(CommandHandler("testdaily", testdaily_command))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    # Run timezone check every hour
     job_queue = bot_app.job_queue
     job_queue.run_repeating(
         check_and_send_daily_verses,
-        interval=3600,  # Every hour (3600 seconds)
-        first=10  # Start 10 seconds after boot
+        interval=3600,
+        first=10
     )
-    print(" Hourly timezone check scheduled")
+    print("📅 Hourly timezone check scheduled", flush=True)
     
     subscriber_count = get_subscriber_count()
-    print(f"👥 Current subscribers: {subscriber_count}")
-    print("")
-    print("✅ Bible Bot is running!")
+    print(f"👥 Current subscribers: {subscriber_count}", flush=True)
+    print("✅ Bible Bot is running!", flush=True)
     
     bot_app.run_polling(drop_pending_updates=True)
 
