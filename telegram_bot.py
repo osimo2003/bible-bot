@@ -229,17 +229,26 @@ def get_verse_of_the_day():
     seed = today.year * 10000 + today.month * 100 + today.day
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM verses")
+    
+    # Get only New Testament verses
+    cursor.execute('''
+        SELECT COUNT(*) FROM verses v
+        JOIN books b ON v.book_id = b.book_id
+        WHERE b.testament = 'New'
+    ''')
     total = cursor.fetchone()[0]
+    
     random.seed(seed)
-    verse_id = random.randint(1, total)
+    offset = random.randint(0, total - 1)
+    
     query = '''
         SELECT b.book_name, v.chapter, v.verse, v.text
         FROM verses v
         JOIN books b ON v.book_id = b.book_id
-        WHERE v.id = ?
+        WHERE b.testament = 'New'
+        LIMIT 1 OFFSET ?
     '''
-    cursor.execute(query, (verse_id,))
+    cursor.execute(query, (offset,))
     result = cursor.fetchone()
     conn.close()
     return result
