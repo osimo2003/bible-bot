@@ -1,3 +1,4 @@
+import requests
 import sqlite3
 import random
 import os
@@ -445,6 +446,10 @@ flask_app = Flask(__name__)
 def home():
     return "Bible Bot is running!"
 
+@flask_app.route('/health')
+def health():
+    return "OK"
+
 def run_flask():
     port = int(os.environ.get('PORT', 8080))
     flask_app.run(host='0.0.0.0', port=port)
@@ -453,7 +458,6 @@ def keep_alive():
     t = Thread(target=run_flask)
     t.daemon = True
     t.start()
-
 
 # ─────────────────────────────────────────────────────────────
 # DATABASE HELPERS
@@ -1186,6 +1190,17 @@ async def check_and_send_daily_verses(context: ContextTypes.DEFAULT_TYPE):
         f"_Reply /unsubscribe to stop daily verses_"
     )
 
+async def check_and_send_daily_verses(context: ContextTypes.DEFAULT_TYPE):
+    print(f"⏰ Hourly check running at {datetime.now(pytz.UTC).strftime('%Y-%m-%d %H:%M:%S')} UTC", flush=True)
+    
+    # Self-ping to stay awake
+    try:
+        requests.get("https://bible-bot-khj6.onrender.com/health", timeout=10)
+        print("🏓 Self-ping successful", flush=True)
+    except:
+        pass
+    
+    
     # Collect all subscribers whose local time is currently 6 AM
     # pytz handles GMT/BST switching automatically for Europe/London
     targets = []
