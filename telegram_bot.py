@@ -1160,49 +1160,70 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─────────────────────────────────────────────────────────────
 
 async def check_and_send_daily_verses(context: ContextTypes.DEFAULT_TYPE):
-    print(
-        f"⏰ Hourly check running at "
-        f"{datetime.now(pytz.UTC).strftime('%Y-%m-%d %H:%M:%S')} UTC",
-        flush=True
-    )
-
-    subscribers = get_all_subscribers()
-    if not subscribers:
-        print("📭 No subscribers found", flush=True)
-        return
-
-    print(f"👥 Checking {len(subscribers)} subscribers...", flush=True)
-
-    verse = get_verse_of_the_day()
-    if not verse:
-        print("❌ Could not get verse for daily send", flush=True)
-        return
-
-    book, chapter, verse_num, text = verse
-    today = date.today().strftime("%B %d, %Y")
-
-    message = (
-        f"🌅 *Good Morning! Daily Verse*\n"
-        f"📅 _{today}_\n\n"
-        f"📖 *{book} {chapter}:{verse_num}*\n\n"
-        f"_{text}_\n\n"
-        f"🙏 Have a blessed day!\n\n"
-        f"_Reply /unsubscribe to stop daily verses_"
-    )
-
-async def check_and_send_daily_verses(context: ContextTypes.DEFAULT_TYPE):
-    print(f"⏰ Hourly check running at {datetime.now(pytz.UTC).strftime('%Y-%m-%d %H:%M:%S')} UTC", flush=True)
+    current_utc = datetime.now(pytz.UTC).strftime('%Y-%m-%d %H:%M:%S')
+    print(f"⏰ Hourly check at {current_utc} UTC", flush=True)
     
     # Self-ping to stay awake
     try:
         requests.get("https://bible-bot-khj6.onrender.com/health", timeout=10)
-        print("🏓 Self-ping successful", flush=True)
-    except:
-        pass
+        print("🏓 Self-ping OK", flush=True)
+    except Exception as e:
+        print(f"🏓 Self-ping failed: {e}", flush=True)
     
+    # GET SUBSCRIBERS - THIS LINE WAS MISSING!
+    subscribers = get_all_subscribers()
+    
+    if not subscribers:
+        print("📭 No subscribers", flush=True)
+        return
+    
+    print(f"👥 Checking {len(subscribers)} subscribers...", flush=True)
+    
+    verse = get_verse_of_the_day()
+    if not verse:
+        print("❌ Could not get verse", flush=True)
+        return
+    
+    book, chapter, verse_num, text = verse
+    today = date.today().strftime("%B %d, %Y")
+    
+    message = f"🌅 *Good Morning! Daily Verse*\n"
+    message += f"📅 _{today}_\n\n"
+    message += f"📖 *{book} {chapter}:{verse_num}*\n\n"
+    message += f"_{text}_\n\n"
+    message += "🙏 Have a blessed day!\n\n"
+    message += "_/unsubscribe to stop_"
+    
+    sent_count = 0
+    
+    for chat_id, timezone_str in subscribers:
+        try:
+            if not timezone_str:
+                timezone_str = 'UTC'
+            
+            tz = pytz.timezone(timezone_str)
+            user_time = datetime.now(tz)
+            
+            print(f"  👤 {chat_id}: TZ={timezone_str}, Time={user_time.strftime('%H:%M')}", flush=True)
+            
+            if user_time.hour == 6:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=message,
+                    parse_mode='Markdown'
+                )
+                sent_count += 1
+                print(f"  ✅ Sent to {chat_id}", flush=True)
+                
+        except Exception as e:
+            print(f"  ❌ Error {chat_id}: {e}", flush=True)
+            if "blocked" in str(e).lower() or "not found" in str(e).lower():
+                remove_subscriber(chat_id)
+                print(f"  🗑️ Removed {chat_id}", flush=True)
+    
+    print(f"📤 Done: {sent_count} sent", flush=True)
     
     # Collect all subscribers whose local time is currently 6 AM
-    # pytz handles GMT/BST switching automatically for Europe/London
     targets = []
     for chat_id, timezone_str in subscribers:
         try:
